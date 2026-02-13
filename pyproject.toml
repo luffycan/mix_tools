@@ -31,6 +31,9 @@ dev = [
     "pytest>=7.0",
     "ruff>=0.1",
 ]
+ui = [
+    "streamlit>=1.28",
+]
 
 [project.scripts]
 mix-tools = "mix_tools.cli:main"
