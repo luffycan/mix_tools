@@ -15,6 +15,8 @@ from mix_tools.data.json_csv import csv_to_json, json_to_csv
 from mix_tools.data.sql_generate import generate_insert_sql
 from mix_tools.data.verify import verify_csv_against_json
 from mix_tools.excel.convert import excel_to_json, generate_device_mapping_csv
+from mix_tools.device_up.stat import up_sync_device_stat
+from mix_tools.device_up.up_orders import check_device_orders
 
 st.set_page_config(
     page_title="Mix Tools",
@@ -37,6 +39,7 @@ page = st.sidebar.radio(
         "🔍 重复检测",
         "✅ CSV 校验",
         "📊 Excel 转换",
+        "📱 设备统计",
     ],
 )
 
@@ -137,7 +140,7 @@ elif page == "🔀 文件对比":
 
 # ========== 生成 SQL ==========
 elif page == "📝 生成 SQL":
-    st.header("生成批量 INSERT SQL")
+    st.header("生成批量统一订单插入语句 INSERT SQL")
     uploaded = st.file_uploader("上传编码列表（每行一个）", type=["txt"])
     remark = st.text_input("备注列默认值", value="")
     table = st.text_input("表名", value="hibox_orders.device_need_sync_order")
@@ -278,6 +281,56 @@ elif page == "📊 Excel 转换":
                     data = Path(out_path).read_bytes()
                     st.download_button("下载 CSV", data=data, file_name="device_mapping.csv", mime="text/csv")
                     st.success(f"已生成 {n} 条")
+                except Exception as e:
+                    st.error(str(e))
+
+# ========== 设备统计 ==========
+elif page == "📱 设备统计":
+    st.header("设备订单统计")
+    sub = st.radio("功能", ["设备同步统计", "设备订单校验"], horizontal=True)
+
+    if sub == "设备同步统计":
+        json_file = st.file_uploader("订单 JSON 或 .json.gz 压缩包（每行一条）", type=["json", "gz"])
+        device_file = st.file_uploader("设备列表（可选，每行一个编码）", type=["txt"], help="不传则仅输出 JSON 中出现的设备统计")
+        if json_file:
+            if st.button("统计"):
+                suffix = Path(json_file.name).suffix
+                with tempfile.NamedTemporaryFile(suffix=suffix if suffix == ".gz" else ".json", delete=False) as tj:
+                    tj.write(json_file.getvalue())
+                    path_json = tj.name
+                path_device = None
+                if device_file:
+                    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as td:
+                        td.write(device_file.getvalue())
+                        path_device = td.name
+                out_excel = tempfile.mktemp(suffix=".xlsx")
+                try:
+                    n_dev, n_has = up_sync_device_stat(path_json, out_excel, path_device)
+                    st.success(f"有订单设备 {n_has} 个" + (f"，设备列表 {n_dev} 个" if n_dev else ""))
+                    data_excel = Path(out_excel).read_bytes()
+                    st.download_button("下载 Excel", data=data_excel, file_name="device_up_stat.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                except Exception as e:
+                    st.error(str(e))
+
+    else:
+        device_file = st.file_uploader("设备列表（每行一个编码）", type=["txt"])
+        json_file = st.file_uploader("订单 JSON 或 .json.gz 压缩包（每行一条）", type=["json", "gz"])
+        if device_file and json_file:
+            if st.button("校验"):
+                with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as td:
+                    td.write(device_file.getvalue())
+                    path_device = td.name
+                suffix = Path(json_file.name).suffix
+                with tempfile.NamedTemporaryFile(suffix=suffix if suffix == ".gz" else ".json", delete=False) as tj:
+                    tj.write(json_file.getvalue())
+                    path_json = tj.name
+                try:
+                    all_set, nfc_set, no_order = check_device_orders(path_device, path_json)
+                    st.metric("JSON 中设备数", len(all_set))
+                    st.metric("NFC 设备数", len(nfc_set))
+                    st.metric("无订单设备数", len(no_order))
+                    if no_order:
+                        st.text_area("无订单设备", "\n".join(sorted(no_order)), height=200)
                 except Exception as e:
                     st.error(str(e))
 

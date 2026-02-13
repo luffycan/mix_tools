@@ -207,3 +207,80 @@ def cmd_device_mapping(
     sheet_val: str | int = int(sheet) if sheet.isdigit() else sheet
     n = _gen_device_csv(device_list, excel_file, sheet_val, output_csv)
     click.echo(f"已生成 {n} 条 -> {output_csv}")
+
+
+# 磁盘整理
+from mix_tools.disk.organize import organize as _organize, plan_moves
+from mix_tools.device_up.stat import up_sync_device_stat as _up_sync_device_stat
+from mix_tools.device_up.up_orders import check_device_orders as _check_device_orders
+
+
+@main.group("device")
+def device_group() -> None:
+    """设备统计：订单/NFC 统计、设备列表校验"""
+    pass
+
+
+@device_group.command("sync-stat")
+@click.argument("json_file", type=click.Path(exists=True), help="订单 JSON 或 .json.gz 压缩包")
+@click.option("--device-file", "-d", type=click.Path(exists=True), default=None, help="可选，设备列表（每行一个编码）")
+@click.option("--output", "-o", type=click.Path(), default="device_up_stat.xlsx", help="输出 Excel 路径")
+def cmd_sync_stat(
+    json_file: str,
+    device_file: str | None,
+    output: str,
+) -> None:
+    """设备同步统计：解析订单 JSON，按设备统计订单数、NFC 订单数。可单独传 JSON 或配合设备列表"""
+    n_dev, n_has_order = _up_sync_device_stat(json_file, output, device_file)
+    click.echo(f"有订单设备 {n_has_order} 个" + (f"，设备列表 {n_dev} 个" if n_dev else ""))
+    click.echo(f"输出: {output}")
+
+
+@device_group.command("check-orders")
+@click.argument("device_list", type=click.Path(exists=True))
+@click.argument("json_file", type=click.Path(exists=True), help="订单 JSON 或 .json.gz 压缩包")
+def cmd_check_orders(device_list: str, json_file: str) -> None:
+    """校验设备订单：统计 JSON 中出现过的设备，输出无订单的设备"""
+    all_set, nfc_set, no_order = _check_device_orders(device_list, json_file)
+    click.echo(f"JSON 中设备数: {len(all_set)}, NFC 设备: {len(nfc_set)}")
+    click.echo(f"设备列表中有但 JSON 无订单: {len(no_order)} 个")
+    if no_order:
+        for code in sorted(no_order)[:30]:
+            click.echo(f"  {code}")
+        if len(no_order) > 30:
+            click.echo(f"  ... 共 {len(no_order)} 个")
+
+
+@main.group("disk")
+def disk_group() -> None:
+    """磁盘整理：按文件类型分类"""
+    pass
+
+
+@disk_group.command("organize")
+@click.argument("target", type=click.Path(exists=True, file_okay=False), default="D:\\")
+@click.option("--dry-run/--execute", "dry_run", default=True, help="预览模式（默认），加 --execute 执行实际移动")
+@click.option("-r", "--recursive", is_flag=True, help="递归子目录（慎用，可能影响项目结构）")
+@click.option("-o", "--output", type=click.Path(), help="输出目录，默认与 target 相同")
+def cmd_disk_organize(target: str, dry_run: bool, recursive: bool, output: str | None) -> None:
+    """整理 D 盘（或指定目录）文件：按文档/图片/视频等分类到子文件夹"""
+    total, ok, failed = _organize(target, dry_run=dry_run, recursive=recursive, output_dir=output)
+    if dry_run:
+        click.echo(f"[预览] 将移动 {total} 个文件到：文档 / 图片 / 视频 / 音频 / 压缩包 / 程序 / 其他")
+        if total > 0:
+            plans = plan_moves(
+                Path(target),
+                recursive=recursive,
+                output_dir=Path(output) if output else None,
+            )
+            for p in plans[:20]:
+                click.echo(f"  {p.src.name} -> {p.category}/")
+            if len(plans) > 20:
+                click.echo(f"  ... 共 {len(plans)} 个文件")
+        click.echo("执行移动请使用: mix-tools disk organize D:\\ --execute")
+    else:
+        click.echo(f"已移动 {ok} 个文件")
+        if failed:
+            click.echo(f"失败 {len(failed)} 个:", err=True)
+            for fp, err in failed[:5]:
+                click.echo(f"  {fp}: {err}", err=True)

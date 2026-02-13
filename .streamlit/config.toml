@@ -1,0 +1,6 @@
+# Streamlit 配置
+# https://docs.streamlit.io/develop/streamlit-community-cloud/deploy-streamlit-apps/configuration
+
+[server]
+# 单文件上传最大 500MB（单位：MB）
+maxUploadSize = 500
